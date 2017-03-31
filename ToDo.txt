@@ -1,0 +1,12 @@
+
+
+A ToDo list:
+
+    - Avoid the use of my library mathLibrary.h (by using GNU GSL??).
+    
+    - Make the implementation general for:
+        - Different payoffs
+        - Different bundling techniques
+        - Different basis functions
+        
+    - Dependency on GNU GSL library?
