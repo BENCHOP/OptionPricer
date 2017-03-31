@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "../mylib/mathLibrary.h"
+#include "mathLibrary.h"
 
 #include <gsl/gsl_rng.h>
 #include <gsl/gsl_vector.h>
