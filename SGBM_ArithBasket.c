@@ -4,8 +4,11 @@
 #include "mathLibrary.h"
 
 #include <gsl/gsl_rng.h>
+#include <gsl/gsl_randist.h>
 #include <gsl/gsl_vector.h>
+#include <gsl/gsl_matrix.h>
 #include <gsl/gsl_sort_double.h>
+#include <gsl/gsl_linalg.h>
 
 #define bSIMS (4*MIL)
 #define eSIMS (64*MIL)
@@ -47,7 +50,7 @@ void GcToc(char *c){
 
 /*******************RANDOM NUMBERS********************/
 gsl_rng *gen;
-
+/*
 scalar box_muller(scalar m, scalar s){
 	scalar x1, x2, w, y1;
 	static scalar y2;
@@ -71,6 +74,42 @@ scalar box_muller(scalar m, scalar s){
 
 	return( m + y1*s );
 }//end box_muller
+*/
+
+int randomGaussianMatrix(scalar m, scalar s, int nrows, int ncols, gsl_matrix *Z){
+
+	unsigned int i,j;
+	for(i=0;i<nrows;i++)
+		for(j=0;j<ncols;j++)
+// 			gsl_matrix_set(Z, i, j, m + gsl_ran_gaussian(gen, s));
+			gsl_matrix_set(Z, i, j, m + gsl_ran_gaussian_ziggurat(gen, s));
+
+	return 0;
+}
+
+
+/*********************************************************
+Auxiliary GSL functions
+**********************************************************/
+int free_array_gsl_vector(gsl_vector **arr, int size){
+
+	int i;
+
+	for(i = 0; i < size; i++)
+		gsl_vector_free(arr[i]);
+
+	return 0;
+}
+
+int free_array_gsl_matrix(gsl_matrix **arr, int size){
+
+	int i;
+
+	for(i = 0; i < size; i++)
+		gsl_matrix_free(arr[i]);
+
+	return 0;
+}
 
 /*********************************************************
 Auxiliary function of k-means
@@ -286,86 +325,65 @@ scalar GBM_model(scalar S, scalar sig, scalar mu, scalar dt, scalar dZ){
 Monte Carlo simulation for several assets
 - simulations are stored in SPaths
 **********************************************************/
-void MonteCarlo_MultiAsset(scalar mu,  scalar T, scalar *S0, scalar *sigma, scalar *rho, scalar *C, scalar *SPaths, scalar *ZPaths, scalar *EPaths){
+void MonteCarlo_MultiAsset(scalar mu,  scalar T, /*scalar*/gsl_vector *S0, /*scalar*/gsl_vector *sigma, /*scalar*/gsl_matrix *rho, /*scalar*/gsl_matrix *C, scalar *SPaths, scalar *ZPaths, scalar *EPaths){
 
 	int i, j, j2, k;
 	scalar dt;
-	//scalar nudt[ASSETS];
-	//scalar sigmadt[ASSETS];
 	dt = T/STEPS;
-	/*
-	//nudt calculations
-	PowScalar(sigma, nudt, 1, ASSETS, 2);
-	TimesScalar(nudt, nudt, 1, ASSETS, -0.5);
-	AddScalar(nudt, nudt, 1, ASSETS, mu);
-	TimesScalar(nudt, nudt, 1, ASSETS, dt);
 
-	//sigma calculations
-	TimesScalar(sigma, sigmadt, 1, ASSETS, sqrt(dt));
-
-	scalar mat_nudt[ASSETS*STEPS];
-	scalar mat_sigmadt[ASSETS*STEPS];
-	RepMatCols(nudt, mat_nudt, ASSETS, STEPS);
-	RepMatCols(sigmadt, mat_sigmadt, ASSETS, STEPS);
-
-	scalar RandMat[ASSETS*STEPS];
-	scalar aux[ASSETS*STEPS];
-	scalar Increments1[ASSETS*STEPS];
-	scalar Increments2[ASSETS*STEPS];
-	*/
-	scalar dW[ASSETS];
+	gsl_vector_view dW;// = gsl_vector_alloc(ASSETS);
 	scalar SData[ASSETS];
-	scalar dZ, aux_SData;
+	scalar aux_SData;
 
+	gsl_matrix *vZ[STEPS];
+
+	for(k = 0; k<STEPS; k++){
+		gsl_matrix *Z = gsl_matrix_alloc(ASSETS, SIMS);
+		randomGaussianMatrix(0.0, 1.0, ASSETS, SIMS, Z);
+		gsl_blas_dtrmm(CblasLeft, CblasLower, CblasNoTrans, CblasNonUnit, 1.0, C, Z);
+		vZ[k] = Z;
+	}
+	
 	for(i = 0; i<SIMS; i++){
-	//for(i = 0; i<SIMS/2; i++){
-		/*Set_Matrix(RandMat, ASSETS, STEPS, 0.3);
-		//randn_mat(RandMat, ASSETS, STEPS);
-		Matrix_Multiplication(C, ASSETS, ASSETS, RandMat, STEPS, aux);
-		TimesNbyN(aux, mat_sigmadt, aux, ASSETS, STEPS);
-		AddNbyN(mat_nudt, aux, Increments1, ASSETS, STEPS);
-		//SubNbyN(mat_nudt, aux, Increments2, ASSETS, STEPS);
-		
+		for(k = 0; k<STEPS+1; k++){
+// 			for(j = 0; j<ASSETS; j++){
+// 				dW[j] = box_muller(0.0, 1.0);
+// 				gsl_vector_set(dW, j, gsl_ran_gaussian_ziggurat(gen, 1.0));
+// 			}//end for ASSETS
 
-		for(k = 0; k<STEPS+1; k++){
-			for(j = 0; j<ASSETS; j++){
-				if(k==0){
-					SPaths[pos3Dto1D(i, j, k, ASSETS, STEPS+1)] = S0[j];
-					//SPaths[pos3Dto1D(i+SIMS/2, j, k, ASSETS, STEPS+1)] = S0[j];
-				}else{
-					SPaths[pos3Dto1D(i, j, k, ASSETS, STEPS+1)] = exp( log(SPaths[pos3Dto1D(i, j, k-1, ASSETS, STEPS+1)]) + Increments1[pos2Dto1D(j, k-1, STEPS)] );
-					//SPaths[pos3Dto1D(i+SIMS/2, j, k, ASSETS, STEPS+1)] = exp( log(SPaths[pos3Dto1D(i+SIMS/2, j, k-1, ASSETS, STEPS+1)]) + Increments2[pos2Dto1D(j, k-1, STEPS)] );
-				}//end if k==0
-			}//end for ASSETS
-		}//end for STEPS
-		*/
-		for(k = 0; k<STEPS+1; k++){
-			for(j = 0; j<ASSETS; j++){
-				dW[j] = box_muller(0.0, 1.0);
-			}//end for ASSETS
+// 			gsl_blas_dtrmv(CblasLower, CblasNoTrans, CblasNonUnit, C, dW);
+
+			if(k!=0)
+				dW = gsl_matrix_column(vZ[k-1], i);
 
 			ZPaths[pos2Dto1D(i,k,STEPS+1)] = 1.0;
 			for(j = 0; j<ASSETS; j++){
-				dZ = 0.0;
+// 				dZ = 0.0;
 
-				for(j2 = 0; j2<ASSETS; j2++)
-					dZ += dW[j2]*C[pos2Dto1D(j, j2, ASSETS)];
+// 				for(j2 = 0; j2<ASSETS; j2++)
+// 					dZ += dW[j2]*C[pos2Dto1D(j, j2, ASSETS)];
+// 				for(j2 = 0; j2<j+1; j2++)
+// 					dZ += gsl_vector_get(dW, j2)*gsl_matrix_get(C, j, j2);
 
 				if(k==0){
-					aux_SData = S0[j];
+// 					aux_SData = S0[j];
+					aux_SData = gsl_vector_get(S0, j);
 					SPaths[pos3Dto1D(i, j, k, ASSETS, STEPS+1)] = aux_SData;
 				}else{
-					aux_SData = GBM_model(SPaths[pos3Dto1D(i, j, k-1, ASSETS, STEPS+1)], sigma[j], mu, dt, dZ);
+// 					aux_SData = GBM_model(SPaths[pos3Dto1D(i, j, k-1, ASSETS, STEPS+1)], sigma[j], mu, dt, dZ);
+					aux_SData = GBM_model(SPaths[pos3Dto1D(i, j, k-1, ASSETS, STEPS+1)], gsl_vector_get(sigma, j), mu, dt, gsl_vector_get(&dW.vector, j));
 					SPaths[pos3Dto1D(i, j, k, ASSETS, STEPS+1)] = aux_SData;
 				}
 
 				compute_h_payoff(aux_SData, i, k, j, ZPaths);
 			}//end for ASSETS
 			GetVectorFrom3DMatrix(SPaths, 0, i, 2, k, SIMS, ASSETS, STEPS+1, SData);
-			compute_expectation(SData, mu, sigma, rho, dt, EPaths, i, k);
+			compute_expectation(SData, mu, sigma->data, rho->data, dt, EPaths, i, k);
 		}//end for STEPS
 
 	}//end for SIMS/2
+	
+	free_array_gsl_matrix(vZ, STEPS);
 
 }//end MonteCarlo_MultiAsset
 
@@ -677,30 +695,62 @@ int main(int argc, char **argv){
 	scalar S0[] = {40, 40, 40, 40, 40};//Can be different
 	scalar sigma[] = {0.2, 0.2, 0.2, 0.2, 0.2};
 
-	scalar sig[] = {1.0, rho, rho, rho, rho,
+	scalar Rho[] = {1.0, rho, rho, rho, rho,
 					rho, 1.0, rho, rho, rho,
 					rho, rho, 1.0, rho, rho,
 					rho, rho, rho, 1.0, rho,
 					rho, rho, rho, rho, 1.0 };
 	*/
-	scalar S0[ASSETS], sigma[ASSETS], sig[ASSETS*ASSETS];
+
+// 	cTic();
+	gsl_vector *S0_gsl = gsl_vector_alloc(ASSETS);
+	gsl_vector *sigma_gsl = gsl_vector_alloc(ASSETS);
+	gsl_matrix *Rho_gsl = gsl_matrix_alloc(ASSETS, ASSETS);
+	gsl_matrix_set_identity(Rho_gsl);
+
 	unsigned int i, j;
 	for(i=0;i<ASSETS;i++){
-		S0[i] = 40;
-		sigma[i] = 0.2;
+		gsl_vector_set(S0_gsl, i, 40);
+		gsl_vector_set(sigma_gsl, i, 0.2);
 		for(j=0;j<ASSETS;j++)
-			 if(i==j)
-				 sig[pos2Dto1D(i,j,ASSETS)] = 1.0;
-			 else
-				 sig[pos2Dto1D(i,j,ASSETS)] = rho;
+			 if(i!=j)
+				gsl_matrix_set(Rho_gsl, i, j, rho);
 	}
 	
-	//printf("S0 = "); printVector(S0, ASSETS);
-	//printf("sigma = ");printVector(sigma, ASSETS);
-	//printf("\nsig = \n");printMatrix(sig, ASSETS, ASSETS);
+// 	gsl_matrix_fprintf (stdout, Rho_gsl, "%g");
 
-	scalar C[ASSETS*ASSETS];
-	Cholesky(sig, ASSETS, C);
+	gsl_matrix *C_gsl = gsl_matrix_alloc(ASSETS, ASSETS);
+	gsl_matrix_memcpy(C_gsl, Rho_gsl);
+	gsl_linalg_cholesky_decomp(C_gsl);
+// 	for(i=0;i<ASSETS;i++)
+// 		for(j=i+1;j<ASSETS;j++)
+// 			gsl_matrix_set(C_gsl, i, j, 0.0);
+// 	gsl_matrix_fprintf(stdout, C_gsl, "%g");
+// 	printf("\nC = \n");printMatrix(C_gsl->data, ASSETS, ASSETS);
+// 	cToc("gsl");
+
+// 	cTic();
+// 	scalar S0[ASSETS], sigma[ASSETS], Rho[ASSETS*ASSETS];
+// // 	unsigned int i, j;
+// 	for(i=0;i<ASSETS;i++){
+// 		S0[i] = 40;
+// 		sigma[i] = 0.2;
+// 		for(j=0;j<ASSETS;j++)
+// 			 if(i==j)
+// 				 Rho[pos2Dto1D(i,j,ASSETS)] = 1.0;
+// 			 else
+// 				 Rho[pos2Dto1D(i,j,ASSETS)] = rho;
+// 	}
+// 	
+// 	//printf("S0 = "); printVector(S0, ASSETS);
+// 	//printf("sigma = ");printVector(sigma, ASSETS);
+// // 	printf("\nsig = \n");printMatrix(Rho, ASSETS, ASSETS);
+
+// 	scalar C[ASSETS*ASSETS];
+// 	Cholesky(Rho, ASSETS, C);
+
+// 	printf("\nC = \n");printMatrix(C, ASSETS, ASSETS);
+// 	cToc("myMath");
 
 	scalar dE[TRIALS];
 	scalar pE[TRIALS];
@@ -714,6 +764,7 @@ int main(int argc, char **argv){
 GcTic();
 
 	gen = gsl_rng_alloc(gsl_rng_mt19937);
+	gsl_rng_set(gen, 1234);
 	for(i=0;i<TRIALS;i++){
 
 		/**********************BUNDLING***********************/
@@ -726,7 +777,7 @@ GcTic();
 		EPaths = (scalar *)malloc(SIMS*BASISF*(STEPS+1)*sizeof(scalar));
 cTic();
 		//Training paths for bundling
-		MonteCarlo_MultiAsset(r-q, T, S0, sigma, sig, C, SPaths, ZPaths, EPaths);
+		MonteCarlo_MultiAsset(r-q, T, S0_gsl, sigma_gsl, Rho_gsl, C_gsl, SPaths, ZPaths, EPaths);
 cToc("MCbund");
 cTic();
 		gIdx = (int *)malloc(SIMS*sizeof(int));
@@ -748,7 +799,7 @@ cToc("Bund");
 		EPaths = (scalar *)malloc(SIMS*BASISF*(STEPS+1)*sizeof(scalar));
 cTic();
 		//Monte Carlo paths for simulation
-		MonteCarlo_MultiAsset(r-q, T, S0, sigma, sig, C, SPaths, ZPaths, EPaths);
+		MonteCarlo_MultiAsset(r-q, T, S0_gsl, sigma_gsl, Rho_gsl, C_gsl, SPaths, ZPaths, EPaths);
 cToc("MCdirect");
 // 		ZPaths = (scalar *)malloc(SIMS*(STEPS+1)*sizeof(scalar));
 // cTic();
@@ -773,7 +824,7 @@ cToc("directEst");
 		//gIdx = (int *)malloc(SIMS*sizeof(int));
 cTic();
 		//Monte Carlo paths for simulation
-		MonteCarlo_MultiAsset(r-q, T, S0, sigma, sig, C, SPaths, ZPaths, EPaths);
+		MonteCarlo_MultiAsset(r-q, T, S0_gsl, sigma_gsl, Rho_gsl, C_gsl, SPaths, ZPaths, EPaths);
 cToc("MCpath");
 // 		ZPaths = (scalar *)malloc(SIMS*(STEPS+1)*sizeof(scalar));
 // cTic();
